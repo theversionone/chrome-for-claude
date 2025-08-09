@@ -6,7 +6,10 @@
       "Bash(npm view:*)",
       "Bash(npm install)",
       "Bash(dxt pack:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(move index.js index-old.js)",
+      "Bash(move index-new.js index.js)",
+      "Bash(mv:*)"
     ],
     "deny": []
   }

@@ -2,10 +2,10 @@
   "$schema": "https://anthropics.github.io/dxt/manifest.schema.json",
   "dxt_version": "0.1",
   "name": "chrome-control",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "display_name": "Chrome Browser Control",
-  "description": "Control Google Chrome browser - open tabs, navigate, execute JavaScript, and more",
-  "long_description": "# Chrome Browser Control Extension\n\nA powerful Chrome browser automation extension for Claude Desktop that enables:\n\n- Opening and closing tabs\n- Navigating to URLs\n- Executing JavaScript in pages\n- Getting page content and information\n- Managing browser history\n- Searching and filtering tabs\n\nUses Chrome DevTools Protocol for reliable browser control.",
+  "description": "Professional Chrome browser automation - control tabs, execute JavaScript, interact with web elements, and more",
+  "long_description": "# Chrome Browser Control Extension\n\nA comprehensive Chrome browser automation extension for Claude Desktop that enables:\n\n## Tab Management\n- Opening and closing tabs\n- Switching between tabs\n- Searching tabs by title/URL\n\n## Navigation\n- Navigate to URLs\n- Browser history control (back/forward)\n- Page reloading\n\n## Content & Screenshots\n- Execute JavaScript in pages\n- Extract HTML content\n- Take screenshots (file-based)\n\n## **NEW: Element Interaction**\n- Click buttons, links, and elements\n- Type text into input fields\n- Extract text from elements\n- Check element existence and visibility\n\n## Features\n- Isolated Chrome profile (no conflicts)\n- Auto-launch Chrome with debugging\n- Cross-platform support\n- Professional web automation\n\nUses Chrome DevTools Protocol for reliable browser control.",
   "author": {
     "name": "Chrome Control Extension",
     "email": "support@example.com"
@@ -26,7 +26,10 @@
     "tabs",
     "javascript",
     "navigation",
-    "devtools"
+    "devtools",
+    "element-interaction",
+    "web-scraping",
+    "form-filling"
   ],
   "server": {
     "type": "node",
@@ -85,6 +88,22 @@
     {
       "name": "search_tabs",
       "description": "Search tabs by title or URL"
+    },
+    {
+      "name": "click_element",
+      "description": "Click on web elements using CSS selectors"
+    },
+    {
+      "name": "type_text",
+      "description": "Type text into input fields using CSS selectors"
+    },
+    {
+      "name": "get_element_text",
+      "description": "Extract text content from web elements"
+    },
+    {
+      "name": "element_exists",
+      "description": "Check if elements exist and are visible"
     }
   ],
   "user_config": {

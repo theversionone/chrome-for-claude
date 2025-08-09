@@ -1,18 +1,27 @@
-# Chrome Control Extension for Claude Desktop
+# Chrome Control Extension v2.0 for Claude Desktop
 
-A powerful Chrome browser automation extension that enables Claude to control Google Chrome directly through the Chrome DevTools Protocol.
+A **professional-grade** Chrome browser automation extension that enables Claude to control Google Chrome and **interact with web elements** through the Chrome DevTools Protocol.
 
-## Features
+## 🚀 **NEW in v2.0: Element Interaction**
+
+- **Click Elements**: Click buttons, links, forms using CSS selectors
+- **Type Text**: Fill input fields, text areas, search boxes  
+- **Extract Content**: Get text, values, attributes from any element
+- **Element Detection**: Check if elements exist and are visible
+- **Smart Waiting**: Automatically waits for elements to appear
+- **Error Handling**: Robust error handling with timeout management
+
+## Core Features
 
 - **Tab Management**: Open, close, switch, and search tabs
 - **Navigation**: Navigate to URLs, go back/forward in history, reload pages
 - **JavaScript Execution**: Execute JavaScript code in any tab
 - **Content Extraction**: Get HTML content from pages
-- **Screenshots**: Capture screenshots in PNG or JPEG format
+- **Screenshots**: Capture screenshots in PNG or JPEG format (file-based)
 - **Search**: Search tabs by title or URL pattern
-- **Auto-launch**: Automatically launches Chrome with isolated profile if not running
-- **Isolated Profile**: Uses separate Chrome profile to avoid conflicts with your regular browsing
-- **File-based Screenshots**: Saves screenshots to files instead of returning large base64 data
+- **Auto-launch**: Automatically launches Chrome with isolated profile
+- **Isolated Profile**: Uses separate Chrome profile (no conflicts with regular browsing)
+- **Professional Architecture**: Modular, maintainable codebase
 
 ## Prerequisites
 
@@ -177,6 +186,48 @@ Take a screenshot of a tab (saves to file and returns path)
 
 Returns file information instead of base64 data to avoid response size limits.
 
+### click_element
+Click on web elements using CSS selectors
+```json
+{
+  "tab_id": "tab-id-here",
+  "selector": "button.submit",
+  "timeout": 5000
+}
+```
+
+### type_text  
+Type text into input fields using CSS selectors
+```json
+{
+  "tab_id": "tab-id-here",
+  "selector": "input[name='username']",
+  "text": "my-username",
+  "clear": true,
+  "timeout": 5000
+}
+```
+
+### get_element_text
+Extract text content from web elements
+```json
+{
+  "tab_id": "tab-id-here", 
+  "selector": "h1.title",
+  "timeout": 5000
+}
+```
+
+### element_exists
+Check if elements exist and are visible
+```json
+{
+  "tab_id": "tab-id-here",
+  "selector": ".loading-spinner",
+  "timeout": 1000
+}
+```
+
 ### search_tabs
 Search tabs by title or URL
 ```json
@@ -194,18 +245,69 @@ Navigate a specific tab to a URL
 }
 ```
 
+## 💡 Use Cases & Examples
+
+### Web Automation
+```
+1. Fill out a contact form on example.com
+2. Click the "Search" button on Google
+3. Extract product prices from an e-commerce site
+4. Check if a "Buy Now" button is visible
+```
+
+### Data Collection
+```
+1. Extract text from multiple product listings
+2. Get values from form fields
+3. Check if elements loaded after AJAX calls
+4. Screenshot specific page states
+```
+
+### Testing & QA
+```
+1. Verify button functionality across pages
+2. Test form validation by typing invalid data
+3. Check element visibility in different states
+4. Automate repetitive testing workflows
+```
+
+### CSS Selector Examples
+```css
+/* Basic selectors */
+"button"                    /* All buttons */
+".submit-btn"              /* Class selector */
+"#login-form"              /* ID selector */
+"input[type='email']"      /* Attribute selector */
+
+/* Advanced selectors */
+"form .required-field"     /* Descendant selector */  
+"nav > a"                  /* Direct child */
+"button:first-child"       /* Pseudo-selector */
+"div[data-testid='submit']" /* Data attribute */
+```
+
 ## Development
 
 ### Project Structure
 ```
 chrome-control-dxt/
-├── manifest.json       # DXT extension manifest
-├── package.json        # Node.js dependencies
+├── manifest.json              # DXT extension manifest
+├── package.json              # Node.js dependencies
 ├── server/
-│   └── index.js       # MCP server implementation
+│   ├── index.js              # Main MCP server
+│   ├── chrome-controller.js  # Chrome DevTools Protocol interface
+│   ├── tools/
+│   │   ├── navigation.js     # URL navigation tools
+│   │   ├── tabs.js          # Tab management tools
+│   │   ├── content.js       # Content & screenshot tools
+│   │   ├── elements.js      # 🆕 Element interaction tools
+│   │   └── index.js         # Tool registry and routing
+│   └── utils/
+│       ├── config.js        # Configuration management
+│       └── helpers.js       # Utility functions
 ├── assets/
-│   └── icon.png       # Extension icon (optional)
-└── README.md          # This file
+│   └── icon.png             # Extension icon
+└── README.md                # This file
 ```
 
 ### Testing Locally
