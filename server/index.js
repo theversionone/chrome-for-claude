@@ -42,7 +42,7 @@ class ChromeControlServer {
       this.server = new Server(
         {
           name: 'chrome-control',
-          version: '2.1.0', // Proper CDP DOM.getContentQuads coordinate system
+          version: '3.0.0', // Smart Element Discovery with intelligent selector matching
         },
         {
           capabilities: {

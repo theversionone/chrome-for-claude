@@ -6,6 +6,79 @@ import fs from 'fs/promises';
 import os from 'os';
 import crypto from 'crypto';
 
+// Smart selector patterns for different element types
+const SELECTOR_PATTERNS = {
+  submit: [
+    // Priority order: most specific to least specific
+    'button[type="submit"]',
+    'input[type="submit"]',
+    'button[value*="submit" i]',
+    'input[value*="submit" i]',
+    'button[innerText*="submit" i]',
+    'button[textContent*="submit" i]',
+    '*[role="button"][aria-label*="submit" i]',
+    'button.submit',
+    'button.btn-submit',
+    'button.submit-btn',
+    'button#submit',
+    'form button:last-of-type',
+    'form button.btn-primary',
+    'form button.btn',
+    'form button'
+  ],
+  search: [
+    'input[type="search"]',
+    'input[name*="search" i]',
+    'input[placeholder*="search" i]',
+    'input[aria-label*="search" i]',
+    '*[role="searchbox"]',
+    'input.search',
+    'input#search',
+    'form input[type="text"]:first-of-type'
+  ],
+  login: [
+    'input[type="email"]',
+    'input[name*="email" i]',
+    'input[name*="user" i]',
+    'input[name*="login" i]',
+    'input[placeholder*="email" i]',
+    'input[placeholder*="username" i]',
+    'input[aria-label*="email" i]',
+    'input#email',
+    'input#username',
+    'input.email',
+    'input.username'
+  ],
+  password: [
+    'input[type="password"]',
+    'input[name*="pass" i]',
+    'input[placeholder*="password" i]',
+    'input[aria-label*="password" i]',
+    'input#password',
+    'input.password'
+  ],
+  button: [
+    // Generic button patterns
+    'button',
+    'a.btn',
+    'a.button',
+    '*[role="button"]',
+    'input[type="button"]'
+  ],
+  link: [
+    'a[href]',
+    '*[role="link"]'
+  ],
+  input: [
+    'input[type="text"]',
+    'input[type="email"]',
+    'input[type="tel"]',
+    'input[type="url"]',
+    'input:not([type="hidden"]):not([type="submit"]):not([type="button"])',
+    'textarea'
+  ]
+};
+
 export class ChromeController {
   constructor(config = {}) {
     this.port = config.chrome_port || 9222;
@@ -335,6 +408,213 @@ export class ChromeController {
     });
   }
 
+  // Smart element discovery - tries multiple selector patterns
+  async discoverBestSelector(client, selectorHint, elementType = null) {
+    const results = [];
+    
+    // If it looks like a CSS selector already, try it first
+    if (selectorHint && (selectorHint.includes('.') || selectorHint.includes('#') || selectorHint.includes('[') || selectorHint.includes(':'))) {
+      try {
+        const exists = await this.checkElementExists(client, selectorHint);
+        if (exists) {
+          results.push({
+            selector: selectorHint,
+            confidence: 'exact',
+            description: 'User-provided selector'
+          });
+        }
+      } catch (e) {
+        // Continue to pattern matching
+      }
+    }
+    
+    // Try to determine element type from hint
+    const hintLower = (selectorHint || '').toLowerCase();
+    let patterns = [];
+    
+    // Determine which patterns to try based on hint
+    if (hintLower.includes('submit') || hintLower.includes('send') || hintLower.includes('confirm')) {
+      patterns = SELECTOR_PATTERNS.submit;
+      elementType = 'submit';
+    } else if (hintLower.includes('search') || hintLower.includes('find')) {
+      patterns = SELECTOR_PATTERNS.search;
+      elementType = 'search';
+    } else if (hintLower.includes('login') || hintLower.includes('email') || hintLower.includes('username')) {
+      patterns = SELECTOR_PATTERNS.login;
+      elementType = 'login';
+    } else if (hintLower.includes('password') || hintLower.includes('pass')) {
+      patterns = SELECTOR_PATTERNS.password;
+      elementType = 'password';
+    } else if (hintLower.includes('button') || hintLower.includes('btn') || hintLower.includes('click')) {
+      patterns = SELECTOR_PATTERNS.button;
+      elementType = 'button';
+    } else if (hintLower.includes('link')) {
+      patterns = SELECTOR_PATTERNS.link;
+      elementType = 'link';
+    } else if (hintLower.includes('input') || hintLower.includes('field') || hintLower.includes('text')) {
+      patterns = SELECTOR_PATTERNS.input;
+      elementType = 'input';
+    }
+    
+    // Try text-based matching if hint doesn't match patterns
+    if (patterns.length === 0 && selectorHint) {
+      // Try to find element by text content using JavaScript
+      try {
+        const textResult = await client.Runtime.evaluate({
+          expression: `
+            (() => {
+              const searchText = '${selectorHint.replace(/'/g, "\\'").toLowerCase()}';
+              
+              // Try buttons with text
+              const buttons = Array.from(document.querySelectorAll('button, a.btn, a.button, *[role="button"]'));
+              for (const btn of buttons) {
+                if (btn.textContent.toLowerCase().includes(searchText) ||
+                    btn.innerText?.toLowerCase().includes(searchText) ||
+                    btn.value?.toLowerCase().includes(searchText)) {
+                  return {
+                    found: true,
+                    selector: btn.id ? '#' + btn.id : 
+                             btn.className ? '.' + btn.className.split(' ')[0] : 
+                             btn.tagName.toLowerCase(),
+                    tagName: btn.tagName.toLowerCase(),
+                    text: btn.textContent.trim()
+                  };
+                }
+              }
+              
+              // Try links with text
+              const links = Array.from(document.querySelectorAll('a'));
+              for (const link of links) {
+                if (link.textContent.toLowerCase().includes(searchText)) {
+                  return {
+                    found: true,
+                    selector: link.id ? '#' + link.id : 
+                             link.className ? '.' + link.className.split(' ')[0] : 
+                             'a',
+                    tagName: 'a',
+                    text: link.textContent.trim()
+                  };
+                }
+              }
+              
+              // Try inputs with placeholder/aria-label
+              const inputs = Array.from(document.querySelectorAll('input, textarea'));
+              for (const input of inputs) {
+                if (input.placeholder?.toLowerCase().includes(searchText) ||
+                    input.getAttribute('aria-label')?.toLowerCase().includes(searchText) ||
+                    input.getAttribute('title')?.toLowerCase().includes(searchText)) {
+                  return {
+                    found: true,
+                    selector: input.id ? '#' + input.id : 
+                             input.name ? 'input[name="' + input.name + '"]' :
+                             input.className ? '.' + input.className.split(' ')[0] : 
+                             'input[type="' + (input.type || 'text') + '"]',
+                    tagName: input.tagName.toLowerCase(),
+                    placeholder: input.placeholder
+                  };
+                }
+              }
+              
+              return { found: false };
+            })()
+          `,
+          returnByValue: true
+        });
+        
+        const match = textResult.result.value;
+        if (match && match.found) {
+          results.push({
+            selector: match.selector,
+            confidence: 'text-match',
+            description: `Found ${match.tagName} by text: "${selectorHint}"`
+          });
+        }
+      } catch (e) {
+        // Continue without text matching
+      }
+      
+      // Fallback to attribute selectors
+      const textSelectors = [
+        `*[aria-label*="${selectorHint}" i]`,
+        `*[title*="${selectorHint}" i]`,
+        `input[placeholder*="${selectorHint}" i]`
+      ];
+      
+      for (const selector of textSelectors) {
+        try {
+          const exists = await this.checkElementExists(client, selector);
+          if (exists) {
+            results.push({
+              selector,
+              confidence: 'text-match',
+              description: `Found by text: "${selectorHint}"`
+            });
+            break;
+          }
+        } catch (e) {
+          // Continue trying
+        }
+      }
+    }
+    
+    // Try pattern-based selectors
+    for (const selector of patterns) {
+      try {
+        const exists = await this.checkElementExists(client, selector);
+        if (exists) {
+          results.push({
+            selector,
+            confidence: 'pattern-match',
+            description: `${elementType} element pattern`,
+            elementType
+          });
+          break; // Use first matching pattern
+        }
+      } catch (e) {
+        // Continue trying patterns
+      }
+    }
+    
+    // Return best match or null
+    if (results.length > 0) {
+      const best = results[0];
+      console.error(`Smart selector discovery: Found ${best.description} using '${best.selector}'`);
+      return best;
+    }
+    
+    return null;
+  }
+  
+  // Helper to check if element exists and is visible
+  async checkElementExists(client, selector) {
+    try {
+      const result = await client.Runtime.evaluate({
+        expression: `
+          (() => {
+            const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
+            if (!element) return false;
+            
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            
+            return (
+              rect.width > 0 && 
+              rect.height > 0 && 
+              style.display !== 'none' && 
+              style.visibility !== 'hidden' &&
+              style.opacity !== '0'
+            );
+          })()
+        `,
+        returnByValue: true
+      });
+      
+      return result.result.value === true;
+    } catch (e) {
+      return false;
+    }
+  }
+  
   // Get coordinates using CDP DOM.getContentQuads (preferred) or fallback methods
   async getElementCoordinates(client, selector, options = {}) {
     try {
@@ -555,10 +835,35 @@ export class ChromeController {
     return true;
   }
 
-  async clickElement(tabId, selector, options = {}) {
-    await this.validateSelector(selector);
-    
+  async clickElement(tabId, selectorOrHint, options = {}) {
     return this.withTab(tabId, async (client) => {
+      let selector = selectorOrHint;
+      let discoveryInfo = null;
+      
+      // Try smart discovery if not a clear CSS selector
+      const looksLikeSelector = selectorOrHint && (
+        selectorOrHint.startsWith('.') || 
+        selectorOrHint.startsWith('#') || 
+        selectorOrHint.includes('[') ||
+        selectorOrHint.includes('>') ||
+        selectorOrHint.includes(' .')
+      );
+      
+      if (!looksLikeSelector) {
+        // Use smart discovery
+        discoveryInfo = await this.discoverBestSelector(client, selectorOrHint, 'button');
+        if (discoveryInfo) {
+          selector = discoveryInfo.selector;
+          console.error(`Smart click: Using ${discoveryInfo.description}`);
+        } else {
+          // If discovery fails, try as literal selector
+          selector = selectorOrHint;
+        }
+      }
+      
+      // Validate and sanitize selector
+      await this.validateSelector(selector);
+      
       // Wait for element to be present and visible
       await this.waitForElement(client, selector, options.timeout);
       
@@ -590,6 +895,8 @@ export class ChromeController {
           return {
             success: true,
             selector,
+            originalHint: selectorOrHint !== selector ? selectorOrHint : undefined,
+            discovery: discoveryInfo ? discoveryInfo.description : undefined,
             coordinates: coordResult.coordinates,
             method: `CDP_Input_API_via_${coordResult.method}`
           };
@@ -620,20 +927,47 @@ export class ChromeController {
       return {
         success: true,
         selector,
+        originalHint: selectorOrHint !== selector ? selectorOrHint : undefined,
+        discovery: discoveryInfo ? discoveryInfo.description : undefined,
         coordinates: coordResult.coordinates || { x: null, y: null },
         method: `JavaScript_fallback_from_${coordResult.method}`
       };
     });
   }
 
-  async typeText(tabId, selector, text, options = {}) {
-    await this.validateSelector(selector);
-    
+  async typeText(tabId, selectorOrHint, text, options = {}) {
     if (typeof text !== 'string') {
       throw new Error('Text must be a string');
     }
     
     return this.withTab(tabId, async (client) => {
+      let selector = selectorOrHint;
+      let discoveryInfo = null;
+      
+      // Try smart discovery if not a clear CSS selector
+      const looksLikeSelector = selectorOrHint && (
+        selectorOrHint.startsWith('.') || 
+        selectorOrHint.startsWith('#') || 
+        selectorOrHint.includes('[') ||
+        selectorOrHint.includes('>') ||
+        selectorOrHint.includes(' .')
+      );
+      
+      if (!looksLikeSelector) {
+        // Use smart discovery for input fields
+        discoveryInfo = await this.discoverBestSelector(client, selectorOrHint, 'input');
+        if (discoveryInfo) {
+          selector = discoveryInfo.selector;
+          console.error(`Smart type: Using ${discoveryInfo.description}`);
+        } else {
+          // If discovery fails, try as literal selector
+          selector = selectorOrHint;
+        }
+      }
+      
+      // Validate and sanitize selector
+      await this.validateSelector(selector);
+      
       // Wait for element to be present and visible
       await this.waitForElement(client, selector, options.timeout);
       
@@ -681,6 +1015,8 @@ export class ChromeController {
           return {
             success: true,
             selector,
+            originalHint: selectorOrHint !== selector ? selectorOrHint : undefined,
+            discovery: discoveryInfo ? discoveryInfo.description : undefined,
             text: text.length > 100 ? text.substring(0, 100) + '...' : text,
             coordinates: coordResult.coordinates,
             method: `CDP_Input_API_via_${coordResult.method}`
@@ -724,6 +1060,8 @@ export class ChromeController {
       return {
         success: true,
         selector,
+        originalHint: selectorOrHint !== selector ? selectorOrHint : undefined,
+        discovery: discoveryInfo ? discoveryInfo.description : undefined,
         text: text.length > 100 ? text.substring(0, 100) + '...' : text,
         coordinates: coordResult.coordinates || { x: null, y: null },
         method: `JavaScript_fallback_from_${coordResult.method || 'unknown'}`
@@ -763,6 +1101,64 @@ export class ChromeController {
     });
   }
 
+  // Public method to analyze form structure
+  async analyzeForm(tabId, formSelector = 'form') {
+    return this.withTab(tabId, async (client) => {
+      const formData = await this.analyzeFormInternal(client, formSelector);
+      if (!formData) {
+        throw new Error(`Form not found with selector: ${formSelector}`);
+      }
+      return formData;
+    });
+  }
+  
+  // Internal method for form analysis (renamed from analyzeForm)
+  async analyzeFormInternal(client, formSelector = 'form') {
+    try {
+      const result = await client.Runtime.evaluate({
+        expression: `
+          (() => {
+            const form = document.querySelector('${formSelector.replace(/'/g, "\\'")}');
+            if (!form) return null;
+            
+            const elements = [];
+            const inputs = form.querySelectorAll('input, button, textarea, select');
+            
+            inputs.forEach(el => {
+              const rect = el.getBoundingClientRect();
+              const visible = rect.width > 0 && rect.height > 0;
+              
+              elements.push({
+                tagName: el.tagName.toLowerCase(),
+                type: el.type || '',
+                name: el.name || '',
+                id: el.id || '',
+                className: el.className || '',
+                value: el.value || '',
+                placeholder: el.placeholder || '',
+                textContent: el.textContent?.trim() || '',
+                ariaLabel: el.getAttribute('aria-label') || '',
+                visible
+              });
+            });
+            
+            return {
+              formId: form.id || '',
+              formClass: form.className || '',
+              formAction: form.action || '',
+              elements
+            };
+          })()
+        `,
+        returnByValue: true
+      });
+      
+      return result.result.value;
+    } catch (e) {
+      return null;
+    }
+  }
+  
   async elementExists(tabId, selector, options = {}) {
     await this.validateSelector(selector);
     

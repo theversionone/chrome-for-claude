@@ -1,7 +1,26 @@
 export const elementTools = [
   {
+    name: 'analyze_form',
+    description: 'Analyze a form to discover all input elements and buttons',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tab_id: {
+          type: 'string',
+          description: 'The ID of the tab',
+        },
+        form_selector: {
+          type: 'string',
+          description: 'CSS selector for the form to analyze (default: "form")',
+          default: 'form',
+        },
+      },
+      required: ['tab_id'],
+    },
+  },
+  {
     name: 'click_element',
-    description: 'Click on an element using CSS selector',
+    description: 'Click on an element using CSS selector or smart hint (e.g., "submit button", "search", "login")',
     inputSchema: {
       type: 'object',
       properties: {
@@ -11,7 +30,7 @@ export const elementTools = [
         },
         selector: {
           type: 'string',
-          description: 'CSS selector for the element to click',
+          description: 'CSS selector OR descriptive hint like "submit", "search button", "login field"',
         },
         timeout: {
           type: 'number',
@@ -26,7 +45,7 @@ export const elementTools = [
   },
   {
     name: 'type_text',
-    description: 'Type text into an input field using CSS selector',
+    description: 'Type text into an input field using CSS selector or smart hint (e.g., "search", "email", "password")',
     inputSchema: {
       type: 'object',
       properties: {
@@ -36,7 +55,7 @@ export const elementTools = [
         },
         selector: {
           type: 'string',
-          description: 'CSS selector for the input element',
+          description: 'CSS selector OR descriptive hint like "search", "email field", "username"',
         },
         text: {
           type: 'string',
@@ -112,17 +131,66 @@ export const elementTools = [
 
 export async function handleElementTool(name, args, chromeController) {
   switch (name) {
+    case 'analyze_form': {
+      const { tab_id, form_selector = 'form' } = args;
+      
+      try {
+        const result = await chromeController.analyzeForm(tab_id, form_selector);
+        if (!result) {
+          return {
+            success: false,
+            error: 'No form found with selector: ' + form_selector,
+          };
+        }
+        
+        return {
+          success: true,
+          form: {
+            id: result.formId,
+            class: result.formClass,
+            action: result.formAction,
+            element_count: result.elements.length,
+          },
+          elements: result.elements.map(el => ({
+            type: el.tagName === 'input' ? el.type : el.tagName,
+            name: el.name,
+            id: el.id,
+            placeholder: el.placeholder,
+            text: el.textContent,
+            visible: el.visible,
+            selector: el.id ? `#${el.id}` : 
+                     el.name ? `[name="${el.name}"]` :
+                     el.className ? `.${el.className.split(' ')[0]}` :
+                     el.tagName
+          })),
+          message: `Found ${result.elements.length} form elements`,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error.message,
+          form_selector,
+        };
+      }
+    }
+    
     case 'click_element': {
       const { tab_id, selector, timeout = 5000 } = args;
       
       try {
         const result = await chromeController.clickElement(tab_id, selector, { timeout });
+        const message = result.discovery 
+          ? `Smart discovery: ${result.discovery}. Successfully clicked at (${result.coordinates.x}, ${result.coordinates.y})`
+          : `Successfully clicked element '${selector}' at coordinates (${result.coordinates.x}, ${result.coordinates.y})`;
+        
         return {
           success: true,
           action: 'clicked',
           selector: result.selector,
+          originalHint: result.originalHint,
+          discovery: result.discovery,
           coordinates: result.coordinates,
-          message: `Successfully clicked element '${selector}' at coordinates (${result.coordinates.x}, ${result.coordinates.y})`,
+          message,
         };
       } catch (error) {
         return {
@@ -139,13 +207,19 @@ export async function handleElementTool(name, args, chromeController) {
       
       try {
         const result = await chromeController.typeText(tab_id, selector, text, { clear, timeout });
+        const message = result.discovery
+          ? `Smart discovery: ${result.discovery}. Successfully typed text`
+          : `Successfully typed text into element '${selector}'`;
+        
         return {
           success: true,
           action: 'typed',
           selector: result.selector,
+          originalHint: result.originalHint,
+          discovery: result.discovery,
           text_preview: result.text,
           clear_before_typing: clear,
-          message: `Successfully typed text into element '${selector}'`,
+          message,
         };
       } catch (error) {
         return {
