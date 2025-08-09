@@ -42,7 +42,7 @@ class ChromeControlServer {
       this.server = new Server(
         {
           name: 'chrome-control',
-          version: '2.0.2', // Fixed timing with MutationObserver
+          version: '2.0.3', // Fixed CDP Input API parameter serialization
         },
         {
           capabilities: {

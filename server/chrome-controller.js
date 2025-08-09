@@ -328,6 +328,33 @@ export class ChromeController {
     });
   }
 
+  // Helper method for coordinate validation
+  validateCoordinates(bounds) {
+    if (!bounds || typeof bounds !== 'object') {
+      return null;
+    }
+    
+    const { left, top, width, height } = bounds;
+    
+    // Check if all values are valid numbers
+    if (typeof left !== 'number' || typeof top !== 'number' ||
+        typeof width !== 'number' || typeof height !== 'number' ||
+        isNaN(left) || isNaN(top) || isNaN(width) || isNaN(height) ||
+        width <= 0 || height <= 0) {
+      return null;
+    }
+    
+    const x = Math.round(left + width / 2);
+    const y = Math.round(top + height / 2);
+    
+    // Ensure coordinates are within reasonable bounds
+    if (x < 0 || y < 0 || x > 10000 || y > 10000) {
+      return null;
+    }
+    
+    return { x, y };
+  }
+
   // NEW: Element interaction methods with MutationObserver support
   async waitForElement(client, selector, timeout = 5000) {
     try {
@@ -446,8 +473,8 @@ export class ChromeController {
     return this.withTab(tabId, async (client) => {
       const elementInfo = await this.waitForElement(client, selector, options.timeout);
       
-      const x = elementInfo.bounds.left + elementInfo.bounds.width / 2;
-      const y = elementInfo.bounds.top + elementInfo.bounds.height / 2;
+      // Validate coordinates
+      const coordinates = this.validateCoordinates(elementInfo.bounds);
       
       // Scroll element into view if needed
       await client.Runtime.evaluate({
@@ -457,45 +484,54 @@ export class ChromeController {
       // Small delay for scroll to complete
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Try Input API first, fallback to JavaScript simulation
-      try {
-        if (client.Input && client.Input.dispatchMouseEvent) {
-          // Use Chrome DevTools Input API
+      // Try Input API first if coordinates are valid, fallback to JavaScript simulation
+      if (coordinates && client.Input && client.Input.dispatchMouseEvent) {
+        try {
+          // Use Chrome DevTools Input API with validated coordinates
           await client.Input.dispatchMouseEvent({
             type: 'mousePressed',
-            x: Math.round(x),
-            y: Math.round(y),
+            x: coordinates.x,
+            y: coordinates.y,
             button: 'left',
             clickCount: 1
           });
           
           await client.Input.dispatchMouseEvent({
             type: 'mouseReleased',
-            x: Math.round(x),
-            y: Math.round(y),
+            x: coordinates.x,
+            y: coordinates.y,
             button: 'left',
             clickCount: 1
           });
-        } else {
-          throw new Error('Input API not available, using fallback');
+          
+          return {
+            success: true,
+            selector,
+            coordinates: coordinates,
+            method: 'CDP_Input_API'
+          };
+          
+        } catch (error) {
+          // Fall through to JavaScript fallback
         }
-      } catch (error) {
-        // Fallback: Use JavaScript to simulate click
-        await client.Runtime.evaluate({
-          expression: `
-            const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
-            if (element) {
-              element.scrollIntoView({ behavior: 'instant', block: 'center' });
-              element.click();
-            }
-          `
-        });
       }
+      
+      // Fallback: Use JavaScript to simulate click
+      await client.Runtime.evaluate({
+        expression: `
+          const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
+          if (element) {
+            element.scrollIntoView({ behavior: 'instant', block: 'center' });
+            element.click();
+          }
+        `
+      });
       
       return {
         success: true,
         selector,
-        coordinates: { x: Math.round(x), y: Math.round(y) }
+        coordinates: coordinates || { x: null, y: null },
+        method: 'JavaScript_fallback'
       };
     });
   }
@@ -510,26 +546,26 @@ export class ChromeController {
     return this.withTab(tabId, async (client) => {
       const elementInfo = await this.waitForElement(client, selector, options.timeout);
       
-      // Try Input API first, fallback to JavaScript simulation  
-      console.log(`Attempting to type "${text}" into ${selector}`);
-      try {
-        if (client.Input && client.Input.dispatchMouseEvent && client.Input.insertText) {
+      // Validate coordinates for Input API
+      const coordinates = this.validateCoordinates(elementInfo.bounds);
+      
+      // Try Input API first if coordinates are valid, fallback to JavaScript simulation
+      if (coordinates && client.Input && client.Input.dispatchMouseEvent && client.Input.insertText) {
+        try {
           // Focus the element first by clicking it
-          const x = elementInfo.bounds.left + elementInfo.bounds.width / 2;
-          const y = elementInfo.bounds.top + elementInfo.bounds.height / 2;
           
           await client.Input.dispatchMouseEvent({
             type: 'mousePressed',
-            x: Math.round(x),
-            y: Math.round(y),
+            x: coordinates.x,
+            y: coordinates.y,
             button: 'left',
             clickCount: 1
           });
           
           await client.Input.dispatchMouseEvent({
             type: 'mouseReleased',
-            x: Math.round(x),
-            y: Math.round(y),
+            x: coordinates.x,
+            y: coordinates.y,
             button: 'left',
             clickCount: 1
           });
@@ -549,35 +585,37 @@ export class ChromeController {
           
           // Type the text using Input API
           await client.Input.insertText({ text });
-        } else {
-          throw new Error('Input API not available, using fallback');
+          
+          return {
+            success: true,
+            selector,
+            text: text.length > 100 ? text.substring(0, 100) + '...' : text,
+            method: 'CDP_Input_API'
+          };
+          
+        } catch (error) {
+          // Fall through to JavaScript fallback
         }
-      } catch (error) {
-        // Fallback: Use JavaScript to simulate typing
-        console.log(`Input API failed, using JavaScript fallback: ${error.message}`);
-        await client.Runtime.evaluate({
-          expression: `
-            const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
-            if (element) {
-              console.log('Found element for typing:', element.tagName, element.className);
-              element.focus();
-              element.scrollIntoView({ behavior: 'instant', block: 'center' });
-              ${options.clear !== false ? 'element.value = "";' : ''}
-              element.value = '${text.replace(/'/g, "\\'")}';
-              
-              // Trigger comprehensive events for modern web apps
-              element.dispatchEvent(new Event('focus', { bubbles: true }));
-              element.dispatchEvent(new Event('input', { bubbles: true }));
-              element.dispatchEvent(new Event('change', { bubbles: true }));
-              element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-              
-              console.log('Text typed successfully:', element.value);
-            } else {
-              console.error('Element not found during typing fallback');
-            }
-          `
-        });
       }
+      
+      // Fallback: Use JavaScript to simulate typing
+      await client.Runtime.evaluate({
+        expression: `
+          const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
+          if (element) {
+            element.focus();
+            element.scrollIntoView({ behavior: 'instant', block: 'center' });
+            ${options.clear !== false ? 'element.value = "";' : ''}
+            element.value = '${text.replace(/'/g, "\\'")}';
+            
+            // Trigger comprehensive events for modern web apps
+            element.dispatchEvent(new Event('focus', { bubbles: true }));
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+          }
+        `
+      });
       
       // Trigger change event
       await client.Runtime.evaluate({
@@ -593,7 +631,8 @@ export class ChromeController {
       return {
         success: true,
         selector,
-        text: text.length > 100 ? text.substring(0, 100) + '...' : text
+        text: text.length > 100 ? text.substring(0, 100) + '...' : text,
+        method: 'JavaScript_fallback'
       };
     });
   }
