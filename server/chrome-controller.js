@@ -216,14 +216,7 @@ export class ChromeController {
       await client.Page.enable();
       await client.Runtime.enable();
       
-      // Try to enable Input domain, but don't fail if it's not available
-      try {
-        if (client.Input && client.Input.enable) {
-          await client.Input.enable();
-        }
-      } catch (error) {
-        console.error('Warning: Could not enable Input domain:', error.message);
-      }
+      // Input domain doesn't have an 'enable' method - removed per debugging guide
       
       const result = await callback(client);
       return result;
@@ -335,36 +328,93 @@ export class ChromeController {
     });
   }
 
-  // NEW: Element interaction methods
+  // NEW: Element interaction methods with MutationObserver support
   async waitForElement(client, selector, timeout = 5000) {
-    const startTime = Date.now();
-    
-    while (Date.now() - startTime < timeout) {
-      try {
-        const result = await client.Runtime.evaluate({
-          expression: `
-            const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
-            element ? {
-              exists: true,
-              visible: element.offsetParent !== null,
-              bounds: element.getBoundingClientRect()
-            } : { exists: false }
-          `,
-          returnByValue: true
-        });
+    try {
+      const result = await client.Runtime.evaluate({
+        expression: `
+          new Promise((resolve, reject) => {
+            const findElement = () => {
+              const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
+              if (!element) {
+                return null;
+              }
+              
+              // Modern visibility detection - offsetParent is unreliable
+              const rect = element.getBoundingClientRect();
+              const style = window.getComputedStyle(element);
+              
+              const isVisible = (
+                rect.width > 0 && 
+                rect.height > 0 && 
+                style.display !== 'none' && 
+                style.visibility !== 'hidden' && 
+                style.opacity !== '0'
+              );
+              
+              return {
+                exists: true,
+                visible: isVisible,
+                bounds: rect,
+                styles: {
+                  display: style.display,
+                  visibility: style.visibility,
+                  opacity: style.opacity
+                }
+              };
+            };
+            
+            // Check immediately
+            const element = findElement();
+            if (element && element.visible) {
+              return resolve(element);
+            }
+            
+            // Use MutationObserver for dynamic content
+            const observer = new MutationObserver((mutations, obs) => {
+              const element = findElement();
+              if (element && element.visible) {
+                obs.disconnect();
+                resolve(element);
+              }
+            });
+            
+            // Watch for DOM changes
+            observer.observe(document.body, {
+              childList: true,
+              subtree: true,
+              attributes: true,
+              attributeFilter: ['style', 'class']
+            });
+            
+            // Timeout fallback
+            setTimeout(() => {
+              observer.disconnect();
+              const element = findElement();
+              if (element && element.exists) {
+                // Element exists but may not be visible
+                resolve(element);
+              } else {
+                reject(new Error(\`Element '\${selector}' not found within \${timeout}ms\`));
+              }
+            }, ${timeout});
+          });
+        `,
+        returnByValue: true,
+        awaitPromise: true
+      });
 
-        const elementInfo = result.result.value;
-        if (elementInfo.exists && elementInfo.visible) {
-          return elementInfo;
-        }
-      } catch (error) {
-        // Continue waiting
+      const elementInfo = result.result.value;
+      if (elementInfo && elementInfo.exists) {
+        return elementInfo;
       }
       
-      await new Promise(resolve => setTimeout(resolve, 100));
+      throw new Error(`Element '${selector}' not found`);
+      
+    } catch (error) {
+      console.error('waitForElement evaluation error:', error);
+      throw new Error(`Element '${selector}' not found or not visible within ${timeout}ms`);
     }
-    
-    throw new Error(`Element '${selector}' not found or not visible within ${timeout}ms`);
   }
 
   async validateSelector(selector) {
@@ -460,7 +510,8 @@ export class ChromeController {
     return this.withTab(tabId, async (client) => {
       const elementInfo = await this.waitForElement(client, selector, options.timeout);
       
-      // Try Input API first, fallback to JavaScript simulation
+      // Try Input API first, fallback to JavaScript simulation  
+      console.log(`Attempting to type "${text}" into ${selector}`);
       try {
         if (client.Input && client.Input.dispatchMouseEvent && client.Input.insertText) {
           // Focus the element first by clicking it
@@ -503,15 +554,26 @@ export class ChromeController {
         }
       } catch (error) {
         // Fallback: Use JavaScript to simulate typing
+        console.log(`Input API failed, using JavaScript fallback: ${error.message}`);
         await client.Runtime.evaluate({
           expression: `
             const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
             if (element) {
+              console.log('Found element for typing:', element.tagName, element.className);
               element.focus();
+              element.scrollIntoView({ behavior: 'instant', block: 'center' });
               ${options.clear !== false ? 'element.value = "";' : ''}
               element.value = '${text.replace(/'/g, "\\'")}';
+              
+              // Trigger comprehensive events for modern web apps
+              element.dispatchEvent(new Event('focus', { bubbles: true }));
               element.dispatchEvent(new Event('input', { bubbles: true }));
               element.dispatchEvent(new Event('change', { bubbles: true }));
+              element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+              
+              console.log('Text typed successfully:', element.value);
+            } else {
+              console.error('Element not found during typing fallback');
             }
           `
         });
@@ -585,17 +647,41 @@ export class ChromeController {
         const result = await client.Runtime.evaluate({
           expression: `
             const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
-            element ? {
+            if (!element) {
+              return { exists: false };
+            }
+            
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            
+            const isVisible = (
+              rect.width > 0 && 
+              rect.height > 0 && 
+              style.display !== 'none' && 
+              style.visibility !== 'hidden' && 
+              style.opacity !== '0'
+            );
+            
+            return {
               exists: true,
-              visible: element.offsetParent !== null,
-              display: window.getComputedStyle(element).display,
-              visibility: window.getComputedStyle(element).visibility
-            } : { exists: false }
+              visible: isVisible,
+              display: style.display,
+              visibility: style.visibility,
+              opacity: style.opacity
+            };
           `,
           returnByValue: true
         });
         
         const elementInfo = result.result.value;
+        if (!elementInfo) {
+          return {
+            success: false,
+            error: 'Failed to evaluate element existence',
+            selector
+          };
+        }
+        
         return {
           success: true,
           exists: elementInfo.exists,
@@ -603,7 +689,8 @@ export class ChromeController {
           selector,
           styles: elementInfo.exists ? {
             display: elementInfo.display,
-            visibility: elementInfo.visibility
+            visibility: elementInfo.visibility,
+            opacity: elementInfo.opacity
           } : null
         };
       }

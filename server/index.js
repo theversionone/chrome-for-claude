@@ -42,7 +42,7 @@ class ChromeControlServer {
       this.server = new Server(
         {
           name: 'chrome-control',
-          version: '2.0.0', // Incremented for element interaction features
+          version: '2.0.2', // Fixed timing with MutationObserver
         },
         {
           capabilities: {
