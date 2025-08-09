@@ -1,0 +1,37 @@
+{
+  "name": "chrome-control-dxt",
+  "version": "1.0.0",
+  "description": "Chrome browser control extension for Claude Desktop",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test",
+    "pack": "dxt pack ."
+  },
+  "keywords": [
+    "mcp",
+    "chrome",
+    "browser",
+    "automation",
+    "dxt",
+    "claude"
+  ],
+  "author": {
+    "name": "Chrome Control Extension"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.2",
+    "chrome-remote-interface": "^0.33.2",
+    "find-process": "^1.4.7",
+    "open": "^10.1.0",
+    "ps-list": "^8.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

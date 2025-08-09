@@ -1,0 +1,135 @@
+{
+  "$schema": "https://anthropics.github.io/dxt/manifest.schema.json",
+  "dxt_version": "0.1",
+  "name": "chrome-control",
+  "version": "1.0.0",
+  "display_name": "Chrome Browser Control",
+  "description": "Control Google Chrome browser - open tabs, navigate, execute JavaScript, and more",
+  "long_description": "# Chrome Browser Control Extension\n\nA powerful Chrome browser automation extension for Claude Desktop that enables:\n\n- Opening and closing tabs\n- Navigating to URLs\n- Executing JavaScript in pages\n- Getting page content and information\n- Managing browser history\n- Searching and filtering tabs\n\nUses Chrome DevTools Protocol for reliable browser control.",
+  "author": {
+    "name": "Chrome Control Extension",
+    "email": "support@example.com"
+  },
+  "icon": "assets/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/example/chrome-control-dxt"
+  },
+  "homepage": "https://github.com/example/chrome-control-dxt",
+  "documentation": "https://github.com/example/chrome-control-dxt/blob/main/README.md",
+  "support": "https://github.com/example/chrome-control-dxt/issues",
+  "license": "MIT",
+  "keywords": [
+    "chrome",
+    "browser",
+    "automation",
+    "tabs",
+    "javascript",
+    "navigation",
+    "devtools"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "open_url",
+      "description": "Open a URL in Chrome browser"
+    },
+    {
+      "name": "list_tabs",
+      "description": "List all open tabs in Chrome"
+    },
+    {
+      "name": "get_current_tab",
+      "description": "Get information about the current active tab"
+    },
+    {
+      "name": "close_tab",
+      "description": "Close a specific tab by ID or URL pattern"
+    },
+    {
+      "name": "switch_tab",
+      "description": "Switch to a specific tab"
+    },
+    {
+      "name": "reload_tab",
+      "description": "Reload a specific tab"
+    },
+    {
+      "name": "go_back",
+      "description": "Navigate back in browser history"
+    },
+    {
+      "name": "go_forward",
+      "description": "Navigate forward in browser history"
+    },
+    {
+      "name": "execute_javascript",
+      "description": "Execute JavaScript code in a tab"
+    },
+    {
+      "name": "get_page_content",
+      "description": "Get the HTML content of a page"
+    },
+    {
+      "name": "take_screenshot",
+      "description": "Take a screenshot of a tab"
+    },
+    {
+      "name": "search_tabs",
+      "description": "Search tabs by title or URL"
+    }
+  ],
+  "user_config": {
+    "chrome_port": {
+      "title": "Chrome Debug Port",
+      "description": "Port for Chrome DevTools Protocol (default: 9222)",
+      "type": "number",
+      "default": 9222,
+      "required": false
+    },
+    "chrome_path": {
+      "title": "Chrome Executable Path",
+      "description": "Custom path to Chrome executable",
+      "type": "string",
+      "required": false
+    },
+    "auto_launch": {
+      "title": "Auto Launch Chrome",
+      "description": "Automatically launch Chrome if not running",
+      "type": "boolean",
+      "default": true,
+      "required": false
+    },
+    "headless": {
+      "title": "Headless Mode",
+      "description": "Run Chrome in headless mode",
+      "type": "boolean",
+      "default": false,
+      "required": false
+    },
+    "timeout": {
+      "title": "Operation Timeout",
+      "description": "Timeout for browser operations in milliseconds",
+      "type": "number",
+      "default": 30000,
+      "min": 1000,
+      "max": 120000,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtime": {
+      "node": ">=18.0.0"
+    }
+  }
+}
