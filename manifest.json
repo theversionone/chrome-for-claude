@@ -123,6 +123,19 @@
       "min": 1000,
       "max": 120000,
       "required": false
+    },
+    "isolated_profile": {
+      "title": "Use Isolated Profile",
+      "description": "Launch Chrome with isolated user profile to avoid conflicts",
+      "type": "boolean",
+      "default": true,
+      "required": false
+    },
+    "user_data_dir": {
+      "title": "Custom User Data Directory",
+      "description": "Custom directory for Chrome user data (auto-generated if not specified)",
+      "type": "string",
+      "required": false
     }
   },
   "compatibility": {

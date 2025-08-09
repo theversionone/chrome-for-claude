@@ -10,7 +10,9 @@ A powerful Chrome browser automation extension that enables Claude to control Go
 - **Content Extraction**: Get HTML content from pages
 - **Screenshots**: Capture screenshots in PNG or JPEG format
 - **Search**: Search tabs by title or URL pattern
-- **Auto-launch**: Automatically launches Chrome if not running
+- **Auto-launch**: Automatically launches Chrome with isolated profile if not running
+- **Isolated Profile**: Uses separate Chrome profile to avoid conflicts with your regular browsing
+- **File-based Screenshots**: Saves screenshots to files instead of returning large base64 data
 
 ## Prerequisites
 
@@ -61,30 +63,35 @@ The extension can be configured through Claude Desktop's extension settings:
 - **Auto Launch**: Automatically launch Chrome if not running (default: true)
 - **Headless Mode**: Run Chrome in headless mode (default: false)
 - **Operation Timeout**: Timeout for browser operations in milliseconds (default: 30000)
+- **Use Isolated Profile**: Launch Chrome with separate profile to avoid conflicts (default: true)
+- **Custom User Data Directory**: Custom directory for Chrome user data (auto-generated if not specified)
 
 ## Chrome Setup
 
-For the extension to work, Chrome needs to be running with remote debugging enabled:
-
 ### Automatic Setup (Recommended)
-The extension will automatically launch Chrome with the correct settings if `auto_launch` is enabled.
+**No manual setup required!** The extension automatically:
+- Launches Chrome with an isolated profile (separate from your regular browsing)
+- Enables remote debugging on the configured port
+- Uses a temporary user data directory to avoid conflicts
 
-### Manual Setup
-Launch Chrome with remote debugging:
+This means you can keep using your regular Chrome browser normally while the extension controls its own isolated instance.
+
+### Manual Setup (Optional)
+If you prefer to launch Chrome manually or need specific settings:
 
 **Windows:**
 ```bash
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%TEMP%\chrome-debug"
 ```
 
 **macOS:**
 ```bash
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome-debug"
 ```
 
 **Linux:**
 ```bash
-google-chrome --remote-debugging-port=9222
+google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome-debug"
 ```
 
 ## Available Tools
@@ -160,13 +167,15 @@ Get the HTML content of a page
 ```
 
 ### take_screenshot
-Take a screenshot of a tab
+Take a screenshot of a tab (saves to file and returns path)
 ```json
 {
   "tab_id": "tab-id-here",
   "format": "png"
 }
 ```
+
+Returns file information instead of base64 data to avoid response size limits.
 
 ### search_tabs
 Search tabs by title or URL

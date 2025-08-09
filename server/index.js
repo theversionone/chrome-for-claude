@@ -12,6 +12,8 @@ import psList from 'ps-list';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
+import os from 'os';
+import crypto from 'crypto';
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,8 +25,43 @@ class ChromeController {
     this.autoLaunch = config.auto_launch !== false;
     this.headless = config.headless || false;
     this.timeout = config.timeout || 30000;
+    this.isolatedProfile = config.isolated_profile !== false;
+    this.userDataDir = config.user_data_dir || path.join(os.tmpdir(), `chrome-debug-${Date.now()}`);
+    this.screenshotDir = path.join(os.tmpdir(), 'chrome-control-screenshots');
     this.client = null;
     this.isConnected = false;
+    
+    // Ensure screenshot directory exists
+    this.ensureScreenshotDir();
+  }
+
+  async ensureScreenshotDir() {
+    try {
+      await fs.mkdir(this.screenshotDir, { recursive: true });
+    } catch (error) {
+      console.error('Failed to create screenshot directory:', error);
+    }
+  }
+
+  async cleanupOldScreenshots() {
+    try {
+      const files = await fs.readdir(this.screenshotDir);
+      const now = Date.now();
+      const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+
+      for (const file of files) {
+        if (file.startsWith('screenshot_') && (file.endsWith('.png') || file.endsWith('.jpg'))) {
+          const filePath = path.join(this.screenshotDir, file);
+          const stats = await fs.stat(filePath);
+          
+          if (now - stats.mtime.getTime() > maxAge) {
+            await fs.unlink(filePath);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to cleanup old screenshots:', error);
+    }
   }
 
   async findChromePath() {
@@ -80,11 +117,28 @@ class ChromeController {
       `--remote-debugging-port=${this.port}`,
       '--no-first-run',
       '--no-default-browser-check',
+      '--disable-default-browser-check',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
     ];
+
+    // Add isolated profile support
+    if (this.isolatedProfile) {
+      args.push(`--user-data-dir=${this.userDataDir}`);
+      // Create user data directory if it doesn't exist
+      try {
+        await fs.mkdir(this.userDataDir, { recursive: true });
+      } catch (error) {
+        console.error('Failed to create user data directory:', error);
+      }
+    }
 
     if (this.headless) {
       args.push('--headless=new');
     }
+
+    console.error(`Launching Chrome with args: ${args.join(' ')}`);
 
     const chromeProcess = spawn(chromePath, args, {
       detached: true,
@@ -93,7 +147,7 @@ class ChromeController {
 
     chromeProcess.unref();
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Increased wait time
   }
 
   async connect() {
@@ -253,16 +307,49 @@ class ChromeController {
 
   async takeScreenshot(tabId, format = 'png') {
     return this.withTab(tabId, async (client) => {
+      // Cleanup old screenshots periodically
+      if (Math.random() < 0.1) { // 10% chance to cleanup
+        await this.cleanupOldScreenshots();
+      }
+
       const screenshot = await client.Page.captureScreenshot({
         format,
         quality: format === 'jpeg' ? 80 : undefined,
       });
-      return screenshot.data;
+
+      // Generate unique filename
+      const timestamp = Date.now();
+      const randomId = crypto.randomBytes(4).toString('hex');
+      const extension = format === 'jpeg' ? 'jpg' : 'png';
+      const filename = `screenshot_${timestamp}_${randomId}.${extension}`;
+      const filePath = path.join(this.screenshotDir, filename);
+
+      // Save screenshot to file
+      const buffer = Buffer.from(screenshot.data, 'base64');
+      await fs.writeFile(filePath, buffer);
+
+      return {
+        path: filePath,
+        filename: filename,
+        format: format,
+        size: buffer.length,
+        timestamp: new Date().toISOString(),
+        tabId: tabId
+      };
     });
   }
 }
 
-const chromeController = new ChromeController();
+// Initialize with user configuration (will be populated from environment or config)
+const chromeController = new ChromeController({
+  chrome_port: process.env.CHROME_PORT ? parseInt(process.env.CHROME_PORT) : 9222,
+  chrome_path: process.env.CHROME_PATH || null,
+  auto_launch: process.env.AUTO_LAUNCH !== 'false',
+  headless: process.env.HEADLESS === 'true',
+  timeout: process.env.TIMEOUT ? parseInt(process.env.TIMEOUT) : 30000,
+  isolated_profile: process.env.ISOLATED_PROFILE !== 'false',
+  user_data_dir: process.env.USER_DATA_DIR || null,
+});
 
 const server = new Server(
   {
@@ -627,12 +714,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'take_screenshot': {
         const { tab_id, format = 'png' } = args;
-        const screenshot = await chromeController.takeScreenshot(tab_id, format);
+        const screenshotInfo = await chromeController.takeScreenshot(tab_id, format);
         result = {
           success: true,
-          data: screenshot,
-          format: format,
-          message: `Screenshot taken in ${format} format`,
+          screenshot: {
+            path: screenshotInfo.path,
+            filename: screenshotInfo.filename,
+            format: screenshotInfo.format,
+            size_bytes: screenshotInfo.size,
+            timestamp: screenshotInfo.timestamp,
+            tab_id: screenshotInfo.tabId
+          },
+          message: `Screenshot saved as ${screenshotInfo.filename} (${Math.round(screenshotInfo.size / 1024)}KB)`,
         };
         break;
       }
