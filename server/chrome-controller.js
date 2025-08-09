@@ -216,7 +216,14 @@ export class ChromeController {
       await client.Page.enable();
       await client.Runtime.enable();
       
-      // Input domain doesn't have an 'enable' method - removed per debugging guide
+      // Enable DOM domain for getContentQuads
+      try {
+        if (client.DOM && client.DOM.enable) {
+          await client.DOM.enable();
+        }
+      } catch (error) {
+        console.error('Warning: Could not enable DOM domain:', error.message);
+      }
       
       const result = await callback(client);
       return result;
@@ -328,31 +335,112 @@ export class ChromeController {
     });
   }
 
-  // Helper method for coordinate validation
-  validateCoordinates(bounds) {
-    if (!bounds || typeof bounds !== 'object') {
-      return null;
+  // Get coordinates using CDP DOM.getContentQuads (preferred) or fallback methods
+  async getElementCoordinates(client, selector, options = {}) {
+    try {
+      // Method 1: Try CDP DOM.getContentQuads (most reliable)
+      const document = await client.DOM.getDocument();
+      const node = await client.DOM.querySelector({
+        nodeId: document.root.nodeId,
+        selector: selector
+      });
+      
+      if (node.nodeId) {
+        // Scroll into view if needed
+        try {
+          await client.DOM.scrollIntoViewIfNeeded({ nodeId: node.nodeId });
+        } catch (e) {
+          // scrollIntoViewIfNeeded might not be available, continue
+        }
+        
+        const quads = await client.DOM.getContentQuads({ nodeId: node.nodeId });
+        
+        if (quads.quads && quads.quads.length > 0) {
+          // Use first visible quad and get center point
+          const quad = quads.quads[0]; // [x1, y1, x2, y2, x3, y3, x4, y4]
+          const x = Math.round((quad[0] + quad[4]) / 2); // average of x coords
+          const y = Math.round((quad[1] + quad[5]) / 2); // average of y coords
+          
+          return {
+            success: true,
+            coordinates: { x, y },
+            method: 'DOM.getContentQuads'
+          };
+        }
+      }
+    } catch (error) {
+      // Fall through to fallback methods
     }
     
-    const { left, top, width, height } = bounds;
-    
-    // Check if all values are valid numbers
-    if (typeof left !== 'number' || typeof top !== 'number' ||
-        typeof width !== 'number' || typeof height !== 'number' ||
-        isNaN(left) || isNaN(top) || isNaN(width) || isNaN(height) ||
-        width <= 0 || height <= 0) {
-      return null;
+    try {
+      // Method 2: Try DOM.getBoxModel as backup
+      const document = await client.DOM.getDocument();
+      const node = await client.DOM.querySelector({
+        nodeId: document.root.nodeId,
+        selector: selector
+      });
+      
+      if (node.nodeId) {
+        const boxModel = await client.DOM.getBoxModel({ nodeId: node.nodeId });
+        
+        if (boxModel.model && boxModel.model.content) {
+          const content = boxModel.model.content; // [x1, y1, x2, y2, x3, y3, x4, y4]
+          const x = Math.round((content[0] + content[4]) / 2);
+          const y = Math.round((content[1] + content[5]) / 2);
+          
+          return {
+            success: true,
+            coordinates: { x, y },
+            method: 'DOM.getBoxModel'
+          };
+        }
+      }
+    } catch (error) {
+      // Fall through to JavaScript fallback
     }
     
-    const x = Math.round(left + width / 2);
-    const y = Math.round(top + height / 2);
-    
-    // Ensure coordinates are within reasonable bounds
-    if (x < 0 || y < 0 || x > 10000 || y > 10000) {
-      return null;
+    try {
+      // Method 3: JavaScript fallback with proper serialization
+      const result = await client.Runtime.evaluate({
+        expression: `
+          (() => {
+            const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
+            if (!element) return null;
+            
+            const rect = element.getBoundingClientRect();
+            return {
+              x: rect.x,
+              y: rect.y, 
+              width: rect.width,
+              height: rect.height,
+              left: rect.left,
+              top: rect.top
+            };
+          })()
+        `,
+        returnByValue: true
+      });
+      
+      const bounds = result.result.value;
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        const x = Math.round(bounds.left + bounds.width / 2);
+        const y = Math.round(bounds.top + bounds.height / 2);
+        
+        return {
+          success: true,
+          coordinates: { x, y },
+          method: 'JavaScript_getBoundingClientRect'
+        };
+      }
+    } catch (error) {
+      // All methods failed
     }
     
-    return { x, y };
+    return {
+      success: false,
+      coordinates: null,
+      method: 'all_methods_failed'
+    };
   }
 
   // NEW: Element interaction methods with MutationObserver support
@@ -471,35 +559,30 @@ export class ChromeController {
     await this.validateSelector(selector);
     
     return this.withTab(tabId, async (client) => {
-      const elementInfo = await this.waitForElement(client, selector, options.timeout);
+      // Wait for element to be present and visible
+      await this.waitForElement(client, selector, options.timeout);
       
-      // Validate coordinates
-      const coordinates = this.validateCoordinates(elementInfo.bounds);
+      // Get coordinates using CDP DOM methods
+      const coordResult = await this.getElementCoordinates(client, selector, options);
       
-      // Scroll element into view if needed
-      await client.Runtime.evaluate({
-        expression: `document.querySelector('${selector.replace(/'/g, "\\'")}').scrollIntoView({ behavior: 'instant', block: 'center' })`
-      });
-      
-      // Small delay for scroll to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Try Input API first if coordinates are valid, fallback to JavaScript simulation
-      if (coordinates && client.Input && client.Input.dispatchMouseEvent) {
+      // Try CDP Input API if we have valid coordinates
+      if (coordResult.success && coordResult.coordinates && client.Input && client.Input.dispatchMouseEvent) {
         try {
-          // Use Chrome DevTools Input API with validated coordinates
+          const { x, y } = coordResult.coordinates;
+          
+          // Use Chrome DevTools Input API - produces trusted events
           await client.Input.dispatchMouseEvent({
             type: 'mousePressed',
-            x: coordinates.x,
-            y: coordinates.y,
+            x: x,
+            y: y,
             button: 'left',
             clickCount: 1
           });
           
           await client.Input.dispatchMouseEvent({
             type: 'mouseReleased',
-            x: coordinates.x,
-            y: coordinates.y,
+            x: x,
+            y: y,
             button: 'left',
             clickCount: 1
           });
@@ -507,8 +590,8 @@ export class ChromeController {
           return {
             success: true,
             selector,
-            coordinates: coordinates,
-            method: 'CDP_Input_API'
+            coordinates: coordResult.coordinates,
+            method: `CDP_Input_API_via_${coordResult.method}`
           };
           
         } catch (error) {
@@ -516,13 +599,20 @@ export class ChromeController {
         }
       }
       
-      // Fallback: Use JavaScript to simulate click
+      // Enhanced JavaScript fallback with proper event sequence
       await client.Runtime.evaluate({
         expression: `
           const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
           if (element) {
             element.scrollIntoView({ behavior: 'instant', block: 'center' });
-            element.click();
+            
+            // Fire proper event sequence for better compatibility
+            element.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerId: 1 }));
+            element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+            element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            element.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
           }
         `
       });
@@ -530,8 +620,8 @@ export class ChromeController {
       return {
         success: true,
         selector,
-        coordinates: coordinates || { x: null, y: null },
-        method: 'JavaScript_fallback'
+        coordinates: coordResult.coordinates || { x: null, y: null },
+        method: `JavaScript_fallback_from_${coordResult.method}`
       };
     });
   }
@@ -544,28 +634,30 @@ export class ChromeController {
     }
     
     return this.withTab(tabId, async (client) => {
-      const elementInfo = await this.waitForElement(client, selector, options.timeout);
+      // Wait for element to be present and visible
+      await this.waitForElement(client, selector, options.timeout);
       
-      // Validate coordinates for Input API
-      const coordinates = this.validateCoordinates(elementInfo.bounds);
+      // Get coordinates using CDP DOM methods
+      const coordResult = await this.getElementCoordinates(client, selector, options);
       
       // Try Input API first if coordinates are valid, fallback to JavaScript simulation
-      if (coordinates && client.Input && client.Input.dispatchMouseEvent && client.Input.insertText) {
+      if (coordResult.success && coordResult.coordinates && client.Input && client.Input.dispatchMouseEvent && client.Input.insertText) {
         try {
-          // Focus the element first by clicking it
+          const { x, y } = coordResult.coordinates;
           
+          // Focus the element first by clicking it
           await client.Input.dispatchMouseEvent({
             type: 'mousePressed',
-            x: coordinates.x,
-            y: coordinates.y,
+            x: x,
+            y: y,
             button: 'left',
             clickCount: 1
           });
           
           await client.Input.dispatchMouseEvent({
             type: 'mouseReleased',
-            x: coordinates.x,
-            y: coordinates.y,
+            x: x,
+            y: y,
             button: 'left',
             clickCount: 1
           });
@@ -590,7 +682,8 @@ export class ChromeController {
             success: true,
             selector,
             text: text.length > 100 ? text.substring(0, 100) + '...' : text,
-            method: 'CDP_Input_API'
+            coordinates: coordResult.coordinates,
+            method: `CDP_Input_API_via_${coordResult.method}`
           };
           
         } catch (error) {
@@ -632,7 +725,8 @@ export class ChromeController {
         success: true,
         selector,
         text: text.length > 100 ? text.substring(0, 100) + '...' : text,
-        method: 'JavaScript_fallback'
+        coordinates: coordResult.coordinates || { x: null, y: null },
+        method: `JavaScript_fallback_from_${coordResult.method || 'unknown'}`
       };
     });
   }

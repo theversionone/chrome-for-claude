@@ -2,7 +2,7 @@
   "$schema": "https://anthropics.github.io/dxt/manifest.schema.json",
   "dxt_version": "0.1",
   "name": "chrome-control",
-  "version": "2.0.3",
+  "version": "2.1.0",
   "display_name": "Chrome Browser Control",
   "description": "Professional Chrome browser automation - control tabs, execute JavaScript, interact with web elements, and more",
   "long_description": "# Chrome Browser Control Extension\n\nA comprehensive Chrome browser automation extension for Claude Desktop that enables:\n\n## Tab Management\n- Opening and closing tabs\n- Switching between tabs\n- Searching tabs by title/URL\n\n## Navigation\n- Navigate to URLs\n- Browser history control (back/forward)\n- Page reloading\n\n## Content & Screenshots\n- Execute JavaScript in pages\n- Extract HTML content\n- Take screenshots (file-based)\n\n## **NEW: Element Interaction**\n- Click buttons, links, and elements\n- Type text into input fields\n- Extract text from elements\n- Check element existence and visibility\n\n## Features\n- Isolated Chrome profile (no conflicts)\n- Auto-launch Chrome with debugging\n- Cross-platform support\n- Professional web automation\n\nUses Chrome DevTools Protocol for reliable browser control.",

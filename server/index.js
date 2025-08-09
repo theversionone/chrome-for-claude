@@ -42,7 +42,7 @@ class ChromeControlServer {
       this.server = new Server(
         {
           name: 'chrome-control',
-          version: '2.0.3', // Fixed CDP Input API parameter serialization
+          version: '2.1.0', // Proper CDP DOM.getContentQuads coordinate system
         },
         {
           capabilities: {
